@@ -5,6 +5,12 @@
         "hint": "默认为插件中的地址",
         "default": "https://api.bltcy.ai/v1/chat/completions"
     },
+    "api_model": {
+        "description": "内置的 API 的模型",
+        "type": "string",
+        "hint": "默认为插件中的地址",
+        "default": "nano-banana"
+    },
     "api_keys": {
         "description": "API 密钥列表",
         "type": "list",

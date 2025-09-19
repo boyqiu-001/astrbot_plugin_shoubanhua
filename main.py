@@ -727,6 +727,8 @@ class FigurineProPlugin(Star):
     async def _call_api(self, image_bytes_list: List[bytes], prompt: str) -> bytes | str:
         api_url = self.conf.get("api_url")
         if not api_url: return "API URL 未配置"
+        api_model = self.conf.get("api_model")
+        if not api_url: return "API URL 未配置"
         api_key = await self._get_api_key()
         if not api_key: return "无可用的 API Key"
 
@@ -744,7 +746,7 @@ class FigurineProPlugin(Star):
             })
 
         payload = {
-            "model": "nano-banana",
+            "model": api_model,
             "max_tokens": 1500,
             "stream": False,
             "messages": [{

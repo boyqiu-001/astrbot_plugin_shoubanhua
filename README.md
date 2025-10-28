@@ -1,8 +1,10 @@
 # 通过第三方柏拉图api调用 Banana的api使用
 注册地址 [柏拉图1](https://api.bltcy.ai/register?aff=3hiF)，注册地址 [柏拉图2](https://api.bltcy.ai/register?aff=cKgq)
-
+# 原先bnn涨价原因
+因为nano-banana涨价到0.08一次毫无性价比，上了自定义模型建议全部换成gemini-2.5-flash-image-preview、gemini-2.5-flash-image。
+测试下来效果是一样的
 ## 功能特性
-
+新增文生图、自定义模型
 - **多风格转换**：内置十几种指令，如 `#手办化`、`#Q版化`、`#痛车化`、`#鬼图` 等，满足不同场景需求。
 - **自定义生成**：使用 `#bnn <提示词>` 指令，可以完全自定义 Prompt 进行创作。
 - **灵活的输入方式**：支持直接发送图片、回复图片、或`@用户`来使用其头像进行制作。

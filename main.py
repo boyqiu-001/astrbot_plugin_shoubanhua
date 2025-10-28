@@ -24,7 +24,7 @@ from astrbot.core.platform.astr_message_event import AstrMessageEvent
     "astrbot_plugin_shoubanhua",
     "shskjw",
     "通过第三方api进行手办化等功能",
-    "1.3.1",  # Incremented version for the fix
+    "1.4.0", 
     "https://github.com/shkjw/astrbot_plugin_shoubanhua",
 )
 class FigurineProPlugin(Star):
@@ -34,25 +34,22 @@ class FigurineProPlugin(Star):
             self.session = aiohttp.ClientSession()
             self.proxy = proxy_url
 
-        # --- 【修改】增加了详细的错误日志记录 ---
         async def _download_image(self, url: str) -> bytes | None:
             logger.info(f"正在尝试下载图片: {url}")
             try:
                 async with self.session.get(url, proxy=self.proxy, timeout=30) as resp:
-                    resp.raise_for_status()  # 这会对4xx/5xx状态码抛出异常
+                    resp.raise_for_status()
                     return await resp.read()
             except aiohttp.ClientResponseError as e:
-                # 捕获特定的HTTP错误
                 logger.error(f"图片下载失败: HTTP状态码 {e.status}, URL: {url}, 原因: {e.message}")
                 return None
             except asyncio.TimeoutError:
                 logger.error(f"图片下载失败: 请求超时 (30s), URL: {url}")
                 return None
             except Exception as e:
-                # 捕获其他所有异常 (如网络、SSL等)
-                logger.error(f"图片下载失败: 发生未知错误, URL: {url}, 错误类型: {type(e).__name__}, 错误: {e}", exc_info=True)
+                logger.error(f"图片下载失败: 发生未知错误, URL: {url}, 错误类型: {type(e).__name__}, 错误: {e}",
+                             exc_info=True)
                 return None
-        # --- 修改结束 ---
 
         async def _get_avatar(self, user_id: str) -> bytes | None:
             if not user_id.isdigit(): logger.warning(f"无法获取非 QQ 平台或无效 QQ 号 {user_id} 的头像。"); return None
@@ -192,7 +189,8 @@ class FigurineProPlugin(Star):
             if sender_id in self.conf.get("user_blacklist", []): return
             if group_id and group_id in self.conf.get("group_blacklist", []): return
             if self.conf.get("user_whitelist", []) and sender_id not in self.conf.get("user_whitelist", []): return
-            if group_id and self.conf.get("group_whitelist", []) and group_id not in self.conf.get("group_whitelist", []): return
+            if group_id and self.conf.get("group_whitelist", []) and group_id not in self.conf.get("group_whitelist",
+                                                                                                   []): return
             user_count = self._get_user_count(sender_id)
             group_count = self._get_group_count(group_id) if group_id else 0
             user_limit_on = self.conf.get("enable_user_limit", True)
@@ -201,12 +199,15 @@ class FigurineProPlugin(Star):
             has_user_count = not user_limit_on or user_count > 0
             if group_id:
                 if not has_group_count and not has_user_count:
-                    yield event.plain_result("❌ 本群次数与您的个人次数均已用尽。"); return
+                    yield event.plain_result("❌ 本群次数与您的个人次数均已用尽。");
+                    return
             elif not has_user_count:
-                yield event.plain_result("❌ 您的使用次数已用完。"); return
+                yield event.plain_result("❌ 您的使用次数已用完。");
+                return
         if not self.iwf or not (img_bytes_list := await self.iwf.get_images(event)):
             if not is_bnn:
-                yield event.plain_result("请发送或引用一张图片。"); return
+                yield event.plain_result("请发送或引用一张图片。");
+                return
         images_to_process = []
         display_cmd = cmd
         if is_bnn:
@@ -221,7 +222,8 @@ class FigurineProPlugin(Star):
             yield event.plain_result(f"🎨 检测到 {len(images_to_process)} 张图片，正在生成 [{display_cmd}]...")
         else:
             if not img_bytes_list:
-                 yield event.plain_result("请发送或引用一张图片。"); return
+                yield event.plain_result("请发送或引用一张图片。");
+                return
             images_to_process = [img_bytes_list[0]]
             yield event.plain_result(f"🎨 收到请求，正在生成 [{cmd}]...")
         start_time = datetime.now()
@@ -237,15 +239,76 @@ class FigurineProPlugin(Star):
             if is_master:
                 caption_parts.append("剩余次数: ∞")
             else:
-                if self.conf.get("enable_user_limit", True): caption_parts.append(f"个人剩余: {self._get_user_count(sender_id)}")
-                if self.conf.get("enable_group_limit", False) and group_id: caption_parts.append(f"本群剩余: {self._get_group_count(group_id)}")
+                if self.conf.get("enable_user_limit", True): caption_parts.append(
+                    f"个人剩余: {self._get_user_count(sender_id)}")
+                if self.conf.get("enable_group_limit", False) and group_id: caption_parts.append(
+                    f"本群剩余: {self._get_group_count(group_id)}")
             yield event.chain_result([Image.fromBytes(res), Plain(" | ".join(caption_parts))])
         else:
             yield event.plain_result(f"❌ 生成失败 ({elapsed:.2f}s)\n原因: {res}")
         event.stop_event()
 
-    # The rest of the file remains the same...
-    # ... (omitted for brevity, please keep the rest of your original file from here)
+    @filter.command("文生图", prefix_optional=True)
+    async def on_text_to_image_request(self, event: AstrMessageEvent):
+        prompt = event.message_str.strip()
+        if not prompt:
+            yield event.plain_result("请提供文生图的描述。用法: #文生图 <描述>")
+            return
+
+        sender_id = event.get_sender_id()
+        group_id = event.get_group_id()
+        is_master = self.is_global_admin(event)
+
+        # --- 权限和次数检查 ---
+        if not is_master:
+            if sender_id in self.conf.get("user_blacklist", []): return
+            if group_id and group_id in self.conf.get("group_blacklist", []): return
+            if self.conf.get("user_whitelist", []) and sender_id not in self.conf.get("user_whitelist", []): return
+            if group_id and self.conf.get("group_whitelist", []) and group_id not in self.conf.get("group_whitelist",
+                                                                                                   []): return
+            user_count = self._get_user_count(sender_id)
+            group_count = self._get_group_count(group_id) if group_id else 0
+            user_limit_on = self.conf.get("enable_user_limit", True)
+            group_limit_on = self.conf.get("enable_group_limit", False) and group_id
+            has_group_count = not group_limit_on or group_count > 0
+            has_user_count = not user_limit_on or user_count > 0
+            if group_id:
+                if not has_group_count and not has_user_count:
+                    yield event.plain_result("❌ 本群次数与您的个人次数均已用尽。");
+                    return
+            elif not has_user_count:
+                yield event.plain_result("❌ 您的使用次数已用完。");
+                return
+
+        display_prompt = prompt[:20] + '...' if len(prompt) > 20 else prompt
+        yield event.plain_result(f"🎨 收到文生图请求，正在生成 [{display_prompt}]...")
+
+        start_time = datetime.now()
+        # 调用通用API，但传入空的图片列表
+        res = await self._call_api([], prompt)
+        elapsed = (datetime.now() - start_time).total_seconds()
+
+        if isinstance(res, bytes):
+            if not is_master:
+                # 扣除次数
+                if self.conf.get("enable_group_limit", False) and group_id and self._get_group_count(group_id) > 0:
+                    await self._decrease_group_count(group_id)
+                elif self.conf.get("enable_user_limit", True) and self._get_user_count(sender_id) > 0:
+                    await self._decrease_user_count(sender_id)
+
+            caption_parts = [f"✅ 生成成功 ({elapsed:.2f}s)"]
+            if is_master:
+                caption_parts.append("剩余次数: ∞")
+            else:
+                if self.conf.get("enable_user_limit", True): caption_parts.append(
+                    f"个人剩余: {self._get_user_count(sender_id)}")
+                if self.conf.get("enable_group_limit", False) and group_id: caption_parts.append(
+                    f"本群剩余: {self._get_group_count(group_id)}")
+            yield event.chain_result([Image.fromBytes(res), Plain(" | ".join(caption_parts))])
+        else:
+            yield event.plain_result(f"❌ 生成失败 ({elapsed:.2f}s)\n原因: {res}")
+        event.stop_event()
+
     @filter.command("lm添加", aliases={"lma"}, prefix_optional=True)
     async def add_lm_prompt(self, event: AstrMessageEvent):
         if not self.is_global_admin(event): return
@@ -272,16 +335,18 @@ class FigurineProPlugin(Star):
     async def on_prompt_help(self, event: AstrMessageEvent):
         keyword = event.message_str.strip()
         if not keyword:
-            msg = "可用的生图提示词: \n"
+            msg = "图生图预设指令: \n"
             msg += "、".join(self.prompt_map.keys())
+            msg += "\n\n纯文本生图指令: \n#文生图 <你的描述>"
+            msg += "\n\n发送图片 + 预设指令 或 @用户 + 预设指令 来进行图生图。"
             yield event.plain_result(msg)
             return
 
         prompt = self.prompt_map.get(keyword)
         if not prompt:
-            yield event.plain_result("未找到此提示词")
+            yield event.plain_result("未找到此预设指令")
             return
-        yield event.plain_result(f"{keyword}:\n{prompt}")
+        yield event.plain_result(f"预设 [{keyword}] 的内容:\n{prompt}")
 
     def is_global_admin(self, event: AstrMessageEvent) -> bool:
         admin_ids = self.context.get_config().get("admins_id", [])
@@ -295,12 +360,15 @@ class FigurineProPlugin(Star):
             data = await loop.run_in_executor(None, json.loads, content)
             if isinstance(data, dict): self.user_counts = {str(k): v for k, v in data.items()}
         except Exception as e:
-            logger.error(f"加载用户次数文件时发生错误: {e}", exc_info=True); self.user_counts = {}
+            logger.error(f"加载用户次数文件时发生错误: {e}", exc_info=True);
+            self.user_counts = {}
 
     async def _save_user_counts(self):
         loop = asyncio.get_running_loop()
         try:
-            json_data = await loop.run_in_executor(None, functools.partial(json.dumps, self.user_counts, ensure_ascii=False, indent=4))
+            json_data = await loop.run_in_executor(None,
+                                                   functools.partial(json.dumps, self.user_counts, ensure_ascii=False,
+                                                                     indent=4))
             await loop.run_in_executor(None, self.user_counts_file.write_text, json_data, "utf-8")
         except Exception as e:
             logger.error(f"保存用户次数文件时发生错误: {e}", exc_info=True)
@@ -321,12 +389,15 @@ class FigurineProPlugin(Star):
             data = await loop.run_in_executor(None, json.loads, content)
             if isinstance(data, dict): self.group_counts = {str(k): v for k, v in data.items()}
         except Exception as e:
-            logger.error(f"加载群组次数文件时发生错误: {e}", exc_info=True); self.group_counts = {}
+            logger.error(f"加载群组次数文件时发生错误: {e}", exc_info=True);
+            self.group_counts = {}
 
     async def _save_group_counts(self):
         loop = asyncio.get_running_loop()
         try:
-            json_data = await loop.run_in_executor(None, functools.partial(json.dumps, self.group_counts, ensure_ascii=False, indent=4))
+            json_data = await loop.run_in_executor(None,
+                                                   functools.partial(json.dumps, self.group_counts, ensure_ascii=False,
+                                                                     indent=4))
             await loop.run_in_executor(None, self.group_counts_file.write_text, json_data, "utf-8")
         except Exception as e:
             logger.error(f"保存群组次数文件时发生错误: {e}", exc_info=True)
@@ -347,12 +418,14 @@ class FigurineProPlugin(Star):
             data = await loop.run_in_executor(None, json.loads, content)
             if isinstance(data, dict): self.user_checkin_data = {str(k): v for k, v in data.items()}
         except Exception as e:
-            logger.error(f"加载用户签到文件时发生错误: {e}", exc_info=True); self.user_checkin_data = {}
+            logger.error(f"加载用户签到文件时发生错误: {e}", exc_info=True);
+            self.user_checkin_data = {}
 
     async def _save_user_checkin_data(self):
         loop = asyncio.get_running_loop()
         try:
-            json_data = await loop.run_in_executor(None, functools.partial(json.dumps, self.user_checkin_data, ensure_ascii=False, indent=4))
+            json_data = await loop.run_in_executor(None, functools.partial(json.dumps, self.user_checkin_data,
+                                                                           ensure_ascii=False, indent=4))
             await loop.run_in_executor(None, self.user_checkin_file.write_text, json_data, "utf-8")
         except Exception as e:
             logger.error(f"保存用户签到文件时发生错误: {e}", exc_info=True)
@@ -395,7 +468,8 @@ class FigurineProPlugin(Star):
             match = re.search(r"(\d+)\s+(\d+)", cmd_text)
             if match: target_qq, count = match.group(1), int(match.group(2))
         if not target_qq or count <= 0:
-            yield event.plain_result('格式错误:\n#手办化增加用户次数 @用户 <次数>\n或 #手办化增加用户次数 <QQ号> <次数>')
+            yield event.plain_result(
+                '格式错误:\n#手办化增加用户次数 @用户 <次数>\n或 #手办化增加用户次数 <QQ号> <次数>')
             return
         current_count = self._get_user_count(target_qq)
         self.user_counts[str(target_qq)] = current_count + count
@@ -420,7 +494,8 @@ class FigurineProPlugin(Star):
         user_id_to_query = event.get_sender_id()
         if self.is_global_admin(event):
             at_seg = next((s for s in event.message_obj.message if isinstance(s, At)), None)
-            if at_seg: user_id_to_query = str(at_seg.qq)
+            if at_seg:
+                user_id_to_query = str(at_seg.qq)
             else:
                 match = re.search(r"(\d+)", event.message_str)
                 if match: user_id_to_query = match.group(1)
@@ -473,16 +548,20 @@ class FigurineProPlugin(Star):
             return key
 
     def _extract_image_url_from_response(self, data: Dict[str, Any]) -> str | None:
-        try: return data["choices"][0]["message"]["images"][0]["image_url"]["url"]
-        except (IndexError, TypeError, KeyError): pass
-        try: return data["choices"][0]["message"]["images"][0]["url"]
-        except (IndexError, TypeError, KeyError): pass
+        try:
+            return data["choices"][0]["message"]["images"][0]["image_url"]["url"]
+        except (IndexError, TypeError, KeyError):
+            pass
+        try:
+            return data["choices"][0]["message"]["images"][0]["url"]
+        except (IndexError, TypeError, KeyError):
+            pass
         try:
             content_text = data["choices"][0]["message"]["content"]
             url_match = re.search(r'https?://[^\s<>")\]]+', content_text)
             if url_match: return url_match.group(0).rstrip(")>,'\"")
             if '![image](' in content_text:
-                start_idx = content_text.find('![image](')+len('![image](')
+                start_idx = content_text.find('![image](') + len('![image](')
                 end_idx = content_text.find(')', start_idx)
                 if end_idx > start_idx:
                     return content_text[start_idx:end_idx].strip()
@@ -496,14 +575,26 @@ class FigurineProPlugin(Star):
         api_key = await self._get_api_key()
         if not api_key: return "无可用的 API Key"
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+
+        # --- 构建 content 列表 ---
         content = [{"type": "text", "text": prompt}]
         for image_bytes in image_bytes_list:
             img_b64 = base64.b64encode(image_bytes).decode("utf-8")
             content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}})
-        payload = {"model": "nano-banana", "max_tokens": 1500, "stream": False, "messages": [{"role": "user", "content": content}]}
+
+        # --- 从配置读取模型名称 ---
+        model_name = self.conf.get("model", "nano-banana")
+        payload = {
+            "model": model_name,
+            "max_tokens": 1500,
+            "stream": False,
+            "messages": [{"role": "user", "content": content}]
+        }
+
         try:
             if not self.iwf: return "ImageWorkflow 未初始化"
-            async with self.iwf.session.post(api_url, json=payload, headers=headers, proxy=self.iwf.proxy, timeout=120) as resp:
+            async with self.iwf.session.post(api_url, json=payload, headers=headers, proxy=self.iwf.proxy,
+                                             timeout=120) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
                     logger.error(f"API 请求失败: HTTP {resp.status}, 响应: {error_text}")
@@ -521,11 +612,12 @@ class FigurineProPlugin(Star):
                 else:
                     return await self.iwf._download_image(gen_image_url) or "下载生成的图片失败"
         except asyncio.TimeoutError:
-            logger.error("API 请求超时"); return "请求超时"
+            logger.error("API 请求超时");
+            return "请求超时"
         except Exception as e:
-            logger.error(f"调用 API 时发生未知错误: {e}", exc_info=True); return f"发生未知错误: {e}"
+            logger.error(f"调用 API 时发生未知错误: {e}", exc_info=True);
+            return f"发生未知错误: {e}"
 
     async def terminate(self):
         if self.iwf: await self.iwf.terminate()
         logger.info("[FigurinePro] 插件已终止")
-
